@@ -1,63 +1,80 @@
 <?php
-
-include("config.php");
+require_once("config.php");
 session_start();
 
-//get post parameters
+// 클릭재킹 방지
+header("X-Frame-Options: DENY");
 
-$user=$_POST['username'];
-$old=$_POST['oldpasswd'];
-
-
-//check session else redirect to login 
-
-$check=$_SESSION['login_user'];
-if($check==NULL)
-{
-	header("Location: /vulnerable/index.html");
+// 세션 로그인 확인
+if (!isset($_SESSION['login_user'])) {
+    header("Location: /index.php");
+    exit();
 }
 
-//check values else redirect to settings page
-if($check!=NULL && ($user==NULL || $old==NULL) )
-{
-header("Location: /vulnerable/settings.php");	
+$check = $_SESSION['login_user'];
+
+// POST 값 체크
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' ||
+    empty($_POST['username']) || empty($_POST['oldpasswd']) || empty($_POST['csrf_token'])) {
+    header("Location: /settings.php");
+    exit();
 }
 
+$user = $_POST['username'];
+$old = $_POST['oldpasswd'];
+$csrf = $_POST['csrf_token'];
 
-$sql="DELETE from register where username='$user' AND password='$old'";
-
-echo $sql;
-echo "</br>";
-
-$result=mysqli_query($db, $sql) or die('Error querying database.');
-
-if( mysqli_affected_rows($db)>0)
-{
-echo "<h2>Account Deleted successfully</h2>";
-session_destroy();
-}
-else {
-	echo "<h2>Incorrect Password</h2>";
+// CSRF 검증
+if (!isset($_SESSION['csrf']) || $_SESSION['csrf'] !== $csrf) {
+    echo "<h2>CSRF detected... Get out of here!</h2>";
+    exit();
 }
 
+// 사용자 일치 확인
+if ($check !== $user) {
+    echo "<h2>You are not authorized</h2>";
+    exit();
+}
 
-mysqli_close($db);
+// DB에서 사용자 확인 및 비밀번호 검증
+$stmt = $db->prepare("SELECT password FROM register WHERE username = ?");
+$stmt->bind_param("s", $user);
+$stmt->execute();
+$stmt->store_result();
 
+if ($stmt->num_rows === 0) {
+    echo "<h2>User not found</h2>";
+    exit();
+}
+
+$stmt->bind_result($hashed_pw);
+$stmt->fetch();
+
+if (!password_verify($old, $hashed_pw)) {
+    echo "<h2>Incorrect password</h2>";
+    exit();
+}
+
+// 사용자 삭제
+$delete_stmt = $db->prepare("DELETE FROM register WHERE username = ?");
+$delete_stmt->bind_param("s", $user);
+$delete_stmt->execute();
+
+if ($delete_stmt->affected_rows > 0) {
+    session_destroy();
+    echo "<h2>Account deleted successfully</h2>";
+} else {
+    echo "<h2>Deletion failed. Please try again later.</h2>";
+}
+
+$delete_stmt->close();
+$stmt->close();
+$db->close();
 ?>
-
 
 <html>
 <body>
-</br>
-
-<script>
-if(top != window) {
-  top.location = window.location
-}
-
-</script>
-<a href="/vulnerable/settings.php" > <h3> Go back </h3> </a>
-</br>
-<a href="/vulnerable/index.html" > <h3>Login page </h3> </a>
+<br>
+<a href="/index.html"><h3>Login page</h3></a>
 </body>
 </html>
